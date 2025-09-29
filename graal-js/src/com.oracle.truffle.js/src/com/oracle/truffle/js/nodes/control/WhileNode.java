@@ -48,6 +48,7 @@ import com.oracle.truffle.api.instrumentation.InstrumentableNode;
 import com.oracle.truffle.api.instrumentation.Tag;
 import com.oracle.truffle.api.nodes.LoopNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.js.runtime.JSContext;
 import com.oracle.truffle.api.nodes.RepeatingNode;
 import com.oracle.truffle.js.nodes.JavaScriptNode;
 import com.oracle.truffle.js.nodes.access.JSWriteFrameSlotNode;
@@ -114,10 +115,10 @@ public final class WhileNode extends StatementNode {
         return new WhileNode(loopNode, ControlFlowRootTag.Type.DoWhileIteration);
     }
 
-    public static RepeatingNode createForOfRepeatingNode(boolean isForOf, boolean isForOfAsync, JavaScriptNode iteratorNode, JavaScriptNode nextResultNode, JavaScriptNode body,
+    public static RepeatingNode createForOfRepeatingNode(JSContext context, boolean isForOf, boolean isForOfAsync, JavaScriptNode iteratorNode, JavaScriptNode nextResultNode, JavaScriptNode body,
                     JSWriteFrameSlotNode writeNextValueNode) {
         JavaScriptNode nonVoidBody = body instanceof DiscardResultNode ? ((DiscardResultNode) body).getOperand() : body;
-        return ForOfRepeatingNode.create(isForOf, isForOfAsync, iteratorNode, nextResultNode, nonVoidBody, writeNextValueNode);
+        return ForOfRepeatingNode.create(context, isForOf, isForOfAsync, iteratorNode, nextResultNode, nonVoidBody, writeNextValueNode);
     }
 
     @Override

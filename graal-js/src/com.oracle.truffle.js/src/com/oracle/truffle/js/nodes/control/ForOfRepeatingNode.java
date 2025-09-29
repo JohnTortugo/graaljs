@@ -41,7 +41,7 @@
 package com.oracle.truffle.js.nodes.control;
 
 import java.util.Set;
-
+import com.oracle.truffle.js.runtime.JSContext;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -66,6 +66,8 @@ import com.oracle.truffle.js.runtime.objects.Undefined;
  */
 public abstract class ForOfRepeatingNode extends AbstractRepeatingNode implements ResumableNode.WithIntState {
 
+    private JSContext context;
+
     @CompilationFinal private boolean initialized;
     @CompilationFinal private boolean isForOf;
     @CompilationFinal private boolean isForOfAsync;
@@ -76,13 +78,15 @@ public abstract class ForOfRepeatingNode extends AbstractRepeatingNode implement
     @Child IteratorCompleteNode iteratorCompleteNode = IteratorCompleteNode.create();
     @Child IteratorValueNode iteratorValueNode = IteratorValueNode.create();
 
-    public static ForOfRepeatingNode create(boolean isForOf, boolean isForOfAsync, JavaScriptNode iteratorNode, JavaScriptNode nextResultNode, JavaScriptNode body,
+    public static ForOfRepeatingNode create(JSContext context, boolean isForOf, boolean isForOfAsync, JavaScriptNode iteratorNode, JavaScriptNode nextResultNode, JavaScriptNode body,
                     JSWriteFrameSlotNode writeNextValueNode) {
-        return ForOfRepeatingNodeGen.create(isForOf, isForOfAsync, iteratorNode, nextResultNode, body, writeNextValueNode);
+        return ForOfRepeatingNodeGen.create(context, isForOf, isForOfAsync, iteratorNode, nextResultNode, body, writeNextValueNode);
     }
 
-    protected ForOfRepeatingNode(boolean isForOf, boolean isForOfAsync, JavaScriptNode iteratorNode, JavaScriptNode nextResultNode, JavaScriptNode body, JSWriteFrameSlotNode writeNextValueNode) {
+    protected ForOfRepeatingNode(JSContext context, boolean isForOf, boolean isForOfAsync, JavaScriptNode iteratorNode, JavaScriptNode nextResultNode, JavaScriptNode body,
+                    JSWriteFrameSlotNode writeNextValueNode) {
         super(null, body);
+        this.context = context;
         this.isForOf = isForOf;
         this.isForOfAsync = isForOfAsync;
         this.initialized = false;
@@ -111,6 +115,7 @@ public abstract class ForOfRepeatingNode extends AbstractRepeatingNode implement
     protected boolean doGeneric(VirtualFrame frame) {
         if (!initialized && isForOf && !isForOfAsync) {
             this.initialized = true;
+
             CompilerDirectives.transferToInterpreterAndInvalidate();
 
             // Evaluate once (not per iteration):
@@ -119,14 +124,13 @@ public abstract class ForOfRepeatingNode extends AbstractRepeatingNode implement
             // Try to switch to fast array path
             JSDynamicObject fastArray = tryExtractFastArray(rec);
             if (fastArray != null) {
-                ForOfArrayRepeatingNode fast = new ForOfArrayRepeatingNode(fastArray, writeNextValueNode, bodyNode);
+                ForOfArrayRepeatingNode fast = new ForOfArrayRepeatingNode(context, fastArray, writeNextValueNode, bodyNode);
                 replace(fast);
                 return fast.executeRepeating(frame); // tail-call into fast path
             }
         }
 
         Object nextResult = executeNextResult(frame);
-        Object what = iteratorNode.execute(frame);
         boolean done = iteratorCompleteNode.execute(nextResult);
         Object nextValue = iteratorValueNode.execute(nextResult);
         if (done) {
@@ -166,7 +170,7 @@ public abstract class ForOfRepeatingNode extends AbstractRepeatingNode implement
 
     @Override
     protected JavaScriptNode copyUninitialized(Set<Class<? extends Tag>> materializedTags) {
-        return ForOfRepeatingNode.create(isForOf, isForOfAsync,
+        return ForOfRepeatingNode.create(context, isForOf, isForOfAsync,
                         cloneUninitialized(iteratorNode, materializedTags),
                         cloneUninitialized(nextResultNode, materializedTags),
                         cloneUninitialized(bodyNode, materializedTags),
@@ -178,7 +182,7 @@ public abstract class ForOfRepeatingNode extends AbstractRepeatingNode implement
         if (!materializationNeeded()) {
             return this;
         }
-        return ForOfRepeatingNode.create(isForOf, isForOfAsync,
+        return ForOfRepeatingNode.create(context, isForOf, isForOfAsync,
                         cloneUninitialized(iteratorNode, materializedTags),
                         cloneUninitialized(nextResultNode, materializedTags),
                         materializeBody(materializedTags),

@@ -42,6 +42,9 @@ package com.oracle.truffle.js.nodes.control;
 
 import java.util.Set;
 
+import com.oracle.truffle.api.profiles.BranchProfile;
+import com.oracle.truffle.js.runtime.JSContext;
+import com.oracle.truffle.js.nodes.access.ReadElementNode;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.instrumentation.Tag;
@@ -58,36 +61,62 @@ import com.oracle.truffle.js.runtime.objects.Undefined;
 public final class ForOfArrayRepeatingNode extends AbstractRepeatingNode {
 
     @Child private JSWriteFrameSlotNode writeNextValueNode;
+    @Child private ReadElementNode readEl;
+
+    private final BranchProfile notActiveProfile = BranchProfile.create();
+    private final BranchProfile earlyTerminationProfile = BranchProfile.create();
+    private final BranchProfile normalTerminationProfile = BranchProfile.create();
 
     @CompilationFinal private JSDynamicObject array;
-    @CompilationFinal private int length;
+
+    private JSContext context;
 
     // The length of JavaScript arrays is limited to 2^32-1
+    private int length;
     private int index;
+    private boolean active;
 
-    public ForOfArrayRepeatingNode(JSDynamicObject array, JSWriteFrameSlotNode writeNextValueNode, JavaScriptNode bodyNode) {
+    public ForOfArrayRepeatingNode(JSContext context, JSDynamicObject array, JSWriteFrameSlotNode writeNextValueNode, JavaScriptNode bodyNode) {
         super(null, bodyNode);
+        this.context = context;
         this.array = array;
         this.writeNextValueNode = writeNextValueNode;
-        this.length = (int) JSArray.arrayGetLength(array);
-        this.index = 0;
+        this.readEl = ReadElementNode.create(context);
+        this.active = false;
     }
 
     @Override
     public boolean executeRepeating(VirtualFrame frame) {
+        if (!this.active) {
+            notActiveProfile.enter();
+            this.active = true;
+            this.index = 0;
+            this.length = 1000000; // (int) JSArray.arrayGetLength(array);
+        }
+
         if (index >= length) {
+            normalTerminationProfile.enter();
+            this.active = false;
             return false; // loop end
         }
 
         // Reads the element and store it in the binding variable
-        Object elementValue = JSObject.get(array, index++);
+        // Object elementValue = JSObject.get(array, index++);
+        Object elementValue = readEl.executeWithTargetAndIndex(array, index++);
         writeNextValueNode.executeWrite(frame, elementValue);
 
         try {
             executeBody(frame);
+        } catch (BreakException | ReturnException e) {
+            // Loop terminated early: make the node ready for the *next* run
+            earlyTerminationProfile.enter();
+            this.active = false;
+            throw e;
+        } catch (RuntimeException e) {
+            // Any other abrupt completion ends the loop as well
+            this.active = false;
+            throw e;
         } finally {
-            // Clear the binding after every execution of the loop body.
-            // This is required by the JS spec.
             writeNextValueNode.executeWrite(frame, Undefined.instance);
         }
 
@@ -96,7 +125,7 @@ public final class ForOfArrayRepeatingNode extends AbstractRepeatingNode {
 
     @Override
     protected JavaScriptNode copyUninitialized(Set<Class<? extends Tag>> materializedTags) {
-        return new ForOfArrayRepeatingNode(array,
+        return new ForOfArrayRepeatingNode(context, array,
                         cloneUninitialized(writeNextValueNode, materializedTags),
                         cloneUninitialized(bodyNode, materializedTags));
     }
@@ -106,7 +135,7 @@ public final class ForOfArrayRepeatingNode extends AbstractRepeatingNode {
         if (!materializationNeeded()) {
             return this;
         }
-        return new ForOfArrayRepeatingNode(array,
+        return new ForOfArrayRepeatingNode(context, array,
                         cloneUninitialized(writeNextValueNode, materializedTags),
                         materializeBody(materializedTags));
     }
